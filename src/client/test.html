@@ -1,0 +1,23 @@
+<html>
+    <head>
+        <script>
+            var webSocket = new WebSocket('ws://localhost:8080/upload/1');
+ 
+            webSocket.onopen = function(event) {
+                alert('onopen');
+                webSocket.send("Hello Web Socket!");
+            };
+ 
+            webSocket.onmessage = function(event) {
+                alert('onmessage, ' + event.data);
+                webSocket.close();
+            };
+ 
+            webSocket.onclose = function(event) {
+                alert('onclose');
+            };
+        </script>
+    </head>
+    <body>
+    </body>
+</html>

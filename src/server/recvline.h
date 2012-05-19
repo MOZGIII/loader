@@ -1,0 +1,1 @@
+int recvline(int socket, unsigned char **buffer, size_t *len);
