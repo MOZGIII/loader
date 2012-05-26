@@ -10,11 +10,17 @@
 #include "recvline.h"
 
 #define CONNECTION_REQUEST_QUEUE_BACKLOG_SIZE 10
+#define MAX_STRING_SIZE 512
 
 typedef struct server_rec {
 	int socket;
 	int port; // the port used to listen
 } server_rec;
+
+typedef struct header_info_rec {
+	char origin[MAX_STRING_SIZE];
+	
+} header_info_rec;
 
 server_rec server;
 
@@ -52,14 +58,18 @@ void init_listening_socket() {
 }
 
 void handle_new_connection(int client_socket, struct sockaddr_in client_address) {
-	unsigned char *buff;
+	char *buff;
 	size_t len;
+	header_info_rec headers;
 	int in_handshake = 1;
 	
+	#define is_header(string) (strncasecmp(buff, (string), sizeof (string)) == 0)
+	#define copy_header(where) strncpy((where), strstr(buff, ": "), sizeof (where));
+		
 	// Websocket handshake here
 	
 	while(in_handshake) {
-		if(!recvline(client_socket, &buff, &len)) {
+		if(!recvline(client_socket, (unsigned char**)&buff, &len)) {
 			printf("Client disconnected in handshake!\n");
 			exit(EXIT_SUCCESS);
 		}
@@ -71,10 +81,16 @@ void handle_new_connection(int client_socket, struct sockaddr_in client_address)
 		}
 		
 		printf("%s\n", buff);
+		if(is_header("Origin: ")) {
+			printf(":: %s\n", buff);
+			copy_header(headers.origin);
+		}
+		
 		free(buff);
 	}
 	
 	printf("Hi, websocket!\n");
+	printf("Origin: %s\n", headers.origin);
 }
 
 void run_server_loop() {
@@ -98,7 +114,9 @@ void run_server_loop() {
 		if(forkpid == 0) {
 			close(server.socket);
 			handle_new_connection(client_socket, client_address);
-			exit(0);
+			shutdown(client_socket, SHUT_WR);
+			close(client_socket);
+			exit(EXIT_SUCCESS);
 		}
 		close(client_socket);
 	}
