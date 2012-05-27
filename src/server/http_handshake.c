@@ -154,7 +154,7 @@ int http_handshake(int fd) {
 			perror("read");
 			return -1;
 		} else if(r == 0) {
-			fprintf(stderr, "HTTP Handshake: Got EOF");
+			fprintf(stderr, "HTTP Handshake: Got EOF\n");
 			return -1;
 		} else {
 			header_length += r;
@@ -162,7 +162,7 @@ int http_handshake(int fd) {
 				 memcmp(header+header_length-4, "\r\n\r\n", 4) == 0) {
 				break;
 			} else if(header_length == sizeof(header)) {
-				fprintf(stderr, "HTTP Handshake: Too large HTTP headers");
+				fprintf(stderr, "HTTP Handshake: Too large HTTP headers\n");
 				return -1;
 			}
 		}
@@ -171,7 +171,7 @@ int http_handshake(int fd) {
 	if(http_header_find_field_value(header, "Upgrade", "websocket") == NULL ||
 		 http_header_find_field_value(header, "Connection", "Upgrade") == NULL ||
 		 (keyhdstart = http_header_find_field_value(header, "Sec-WebSocket-Key", NULL)) == NULL) {
-		fprintf(stderr, "HTTP Handshake: Missing required header fields");
+		fprintf(stderr, "HTTP Handshake: Missing required header fields\n");
 		return -1;
 	}
 	for(; *keyhdstart == ' '; ++keyhdstart);
@@ -179,7 +179,7 @@ int http_handshake(int fd) {
 	for(; *keyhdend != '\r' && *keyhdend != ' '; ++keyhdend);
 	if(keyhdend-keyhdstart != 24) {
 		printf("%s\n", keyhdstart);
-		fprintf(stderr, "HTTP Handshake: Invalid value in Sec-WebSocket-Key");
+		fprintf(stderr, "HTTP Handshake: Invalid value in Sec-WebSocket-Key\n");
 		return -1;
 	}
 	accept_key = create_accept_key(keyhdstart);

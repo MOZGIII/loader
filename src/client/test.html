@@ -1,23 +1,49 @@
 <html>
-    <head>
-        <script>
-            var webSocket = new WebSocket('ws://localhost:8080/upload/1');
- 
-            webSocket.onopen = function(event) {
-                alert('onopen');
-                webSocket.send("Hello Web Socket!");
-            };
- 
-            webSocket.onmessage = function(event) {
-                alert('onmessage, ' + event.data);
-                webSocket.close();
-            };
- 
-            webSocket.onclose = function(event) {
-                alert('onclose');
-            };
-        </script>
-    </head>
-    <body>
-    </body>
+  <head>
+    <script>
+      function TestSupport() {
+        var result = "Browser capabilities: \n";
+        result += "WebSocket: " + (("WebSocket" in window) ? "supported" : "unsupported") + "\n";
+        return result;
+      }
+      
+      document.write(TestSupport().replace(/([^>])\n/g, '$1<br/>'));
+    </script>
+    
+    
+    <script>
+      function log_write(text) {
+        text = text.replace(/([^>])\n/g, '$1<br/>');
+        console.log(text);
+        document.getElementById("log").innerHtml += text + '<br>';        
+      }
+    
+    /*
+      var webSocket = new WebSocket('ws://localhost:8080/upload/1');
+
+      webSocket.onopen = function(event) {
+        log_write('on_open');
+        webSocket.send("Hello Web Socket!");
+      };
+
+      webSocket.onmessage = function(event) {
+        log_write('onmessage, ' + event.data);
+        webSocket.close();
+      };
+
+      webSocket.onclose = function(event) {
+        log_write('onclose');
+      };*/
+    </script>
+    
+    <script src="sendfile.js"></script>
+  </head>
+  <body>
+    <div style="margin: 20px;">
+      <div id="dropzone" style="border:1px dotted grey; padding: 30px;">Drop files here</div>
+    </div>
+  <div id="log">
+  </div>
+  </body>
+  
 </html>
