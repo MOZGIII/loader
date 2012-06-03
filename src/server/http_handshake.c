@@ -74,10 +74,10 @@ char * create_accept_key(const char *client_key) {
  */
 static char* http_header_find_field_value(char *header, char *field_name, char *value) {
 	char *header_end,
-			 *field_start,
-			 *field_end,
-			 *next_crlf,
-			 *value_start;
+		 *field_start,
+		 *field_end,
+		 *next_crlf,
+		 *value_start;
 	int field_name_len;
 
 	/* Pointer to the last character in the header */
@@ -192,9 +192,7 @@ int http_handshake(int fd) {
 	free(accept_key);
 	res_header_length = strlen(res_header);
 	while(res_header_sent < res_header_length) {
-		while((r = write(fd, res_header+res_header_sent,
-							       res_header_length-res_header_sent)) == -1 &&
-					errno == EINTR);
+		while((r = write(fd, res_header+res_header_sent, res_header_length-res_header_sent)) == -1 && errno == EINTR);
 		if(r == -1) {
 			perror("write");
 			return -1;

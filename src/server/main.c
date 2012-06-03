@@ -18,77 +18,51 @@
 #include <wslay/wslay.h>
 
 #include "http_handshake.h"
+#include "utils.h"
+#include "upload_info.h"
+#include "dbserver.h"
 
-/*
- * Create server socket, listen on *service*.  This function returns
- * file descriptor of server socket if it succeeds, or returns -1.
- */
-int create_listen_socket(const char *service) {
-	struct addrinfo hints, *res, *rp;
-	int sfd = -1;
-	int r;
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-	r = getaddrinfo(0, service, &hints, &res);
-	if(r != 0) {
-		fprintf(stderr, "getaddrinfo: %s", gai_strerror(r));
-		return -1;
-	}
-	for(rp = res; rp; rp = rp->ai_next) {
-		int val = 1;
-		sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-		if(sfd == -1) {
-			continue;
-		}
-		if(setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &val,
-							    (socklen_t)sizeof(val)) == -1) {
-			continue;
-		}
-		if(bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0) {
-			break;
-		}
-		close(sfd);
-	}
-	freeaddrinfo(res);
-	if(listen(sfd, 16) == -1) {
-		perror("listen");
-		close(sfd);
-		return -1;
-	}
-	return sfd;
-}
 
-/*
- * Makes file descriptor *fd* non-blocking mode.
- * This function returns 0, or returns -1.
- */
-int make_non_block(int fd) {
-	int flags, r;
-	while((flags = fcntl(fd, F_GETFL, 0)) == -1 && errno == EINTR);
-	if(flags == -1) {
-		perror("fcntl");
-		return -1;
-	}
-	while((r = fcntl(fd, F_SETFL, flags | O_NONBLOCK)) == -1 && errno == EINTR);
-	if(r == -1) {
-		perror("fcntl");
-		return -1;
-	}
-	return 0;
-}
+// Protocol errors
 
-/*
- * This struct is passed as *user_data* in callback function.  The
- * *fd* member is the file descriptor of the connection to the client.
- */
+#define PROTOCOL_ERROR_INTERNAL          1
+#define PROTOCOL_ERROR_UNVALID_OPERATION 2
+
+
+// Connection roles
+ 
+#define ROLE_UNDEFINED   0  // for when role is not defined yet
+#define ROLE_CONTROLLER  1  // provides session_id and useful info to client
+#define ROLE_TRANSMITTER 2  // transfers all the data payload
+
+// Connection states
+
+#define STATE_INIT 0 // init state
+#define STATE_SESSION_OPENED 1 // session opened
+#define STATE_SESSION_CLOSED 2 // session closed
+#define STATE_ACCEPTING_PAYLOAD 3 // ready to write into a file
+
+// Types
+
 struct Session {
 	int fd;
+	uint32_t session_id; // real session id
+	
+	int role;
+	int state; // states matter only after role is defined
+	
+	int accepting_payload; // non-zero if we are ready to accept file data chunk
+	
+	upload_info_rec * upload_info; // initialized when session is opened
+	
+	
+	char * upload_filename;
+	int chunk_number;
 };
 
-ssize_t send_callback(wslay_event_context_ptr ctx, const uint8_t *data, size_t len, int flags, void *user_data)
-{
+int dbserver_socket;
+
+ssize_t send_callback(wslay_event_context_ptr ctx, const uint8_t *data, size_t len, int flags, void *user_data) {
 	struct Session *session = (struct Session*)user_data;
 	ssize_t r;
 	int sflags = 0;
@@ -126,16 +100,122 @@ ssize_t recv_callback(wslay_event_context_ptr ctx, uint8_t *buf, size_t len, int
 	return r;
 }    
 
+void close_with_reason(wslay_event_context_ptr ctx, uint16_t status, char * text) {
+	wslay_event_queue_close(ctx, status, (unsigned char *) text, strlen(text));
+	wslay_event_send(ctx);
+}
+
+void close_without_reason(wslay_event_context_ptr ctx, uint16_t status) {
+	wslay_event_queue_close(ctx, status, NULL, 0);
+	wslay_event_send(ctx);
+}
+
+void send_ok(wslay_event_context_ptr ctx) {
+	const char * oktext = "ok";
+	struct wslay_event_msg msgarg = {
+		WSLAY_TEXT_FRAME, (unsigned char *)oktext, strlen(oktext)
+	};
+	wslay_event_queue_msg(ctx, &msgarg);
+}
+
 void on_msg_recv_callback(wslay_event_context_ptr ctx,
-							            const struct wslay_event_on_msg_recv_arg *arg,
-							            void *user_data)
-{
-	/* Echo back non-control message */
+							const struct wslay_event_on_msg_recv_arg *arg,
+							void *user_data) {
+	struct Session * session = user_data;	
+	
+	/* Operate with non-control messages */
 	if(!wslay_is_ctrl_frame(arg->opcode)) {
-		struct wslay_event_msg msgarg = {
-			arg->opcode, arg->msg, arg->msg_length
-		};
-		wslay_event_queue_msg(ctx, &msgarg);
+		printf("%02X %d\n", arg->opcode, arg->msg_length);
+		
+		if(session->role == ROLE_UNDEFINED) {
+			// Accept only text messages
+			if(arg->opcode == 0x01) {
+				if(strncmp("CONTROLLER", (char *) arg->msg, arg->msg_length) == 0) {
+					session->role = ROLE_CONTROLLER;
+					session->state = STATE_INIT; // force init state
+					send_ok(ctx);
+				} else if(strncmp("TRANSMITTER", (char *) arg->msg, arg->msg_length) == 0) {
+					session->role = ROLE_TRANSMITTER;
+					session->state = STATE_INIT; // force init state
+					send_ok(ctx);
+				} else {
+					close_with_reason(ctx, PROTOCOL_ERROR_UNVALID_OPERATION, "You must choose connection role at this point.");
+				}
+			} else {
+				close_with_reason(ctx, PROTOCOL_ERROR_UNVALID_OPERATION, "You can only transfer text messages yet.");
+			}
+		} else if(session->role == ROLE_CONTROLLER) {
+			if(session->state == STATE_INIT) {
+				if(strncmp("INFO\n", (char *) arg->msg, min(arg->msg_length, 5)) == 0) { // payload check is really unsafe here, but I dont care right now....
+					upload_info_rec * upload_info = uinfo_create_from_wsmsg((char *) arg->msg, arg->msg_length);
+					
+					log("Got file upload request, file %s [%lld bytes], %d chunks by %lld bytes\n", upload_info->file_name, upload_info->file_size, upload_info->total_chunks, upload_info->chunk_size);
+					session->upload_info = upload_info;
+					
+					// Here we should communicate to external server (database?) and request confirmation, session_id, etc...
+					session->session_id = db_register_session(dbserver_socket, upload_info);
+					
+					// If ok
+					if(session->session_id > 0) {
+					
+						char session_id[32];
+						snprintf(session_id, sizeof session_id, "%d", session->session_id);
+						struct wslay_event_msg msgarg = {
+							WSLAY_TEXT_FRAME, (unsigned char *) session_id, strlen(session_id)
+						};
+						wslay_event_queue_msg(ctx, &msgarg);
+						
+						session->state = STATE_SESSION_OPENED;
+					
+					}
+				}
+				
+				if(session->state == STATE_INIT)
+					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
+			} else {
+				close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
+			}
+		} else if(session->role == ROLE_TRANSMITTER) {
+			if(session->state == STATE_INIT) {
+				session->session_id = atoi((char *) arg->msg);
+				if(session->session_id > 0) {
+					
+					session->upload_filename = db_get_session_upload_path(dbserver_socket, session->session_id);
+					if(session->upload_filename) {
+						send_ok(ctx);
+						session->state = STATE_SESSION_OPENED;
+					}
+				}
+				
+				
+				if(session->state == STATE_INIT)
+					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
+			} else if(session->state == STATE_SESSION_OPENED) {
+				session->chunk_number = atoi((char *) arg->msg);
+				
+				// ask for acceptence, ill just skip it for now
+				
+				send_ok(ctx);
+				session->state = STATE_ACCEPTING_PAYLOAD;
+				
+				if(session->state == STATE_SESSION_OPENED)
+					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
+			} else if(session->state == STATE_ACCEPTING_PAYLOAD) {
+				
+				// writing to a file
+				// here ...
+				
+				printf("Writing chunk #%d to a file %s\n", session->chunk_number, session->upload_filename);
+				
+				send_ok(ctx);
+				session->state = STATE_SESSION_OPENED;
+				
+				if(session->state == STATE_ACCEPTING_PAYLOAD)
+					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
+			} else {
+				close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
+			}			
+		}
 	}
 }
 
@@ -145,8 +225,7 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
  * error occurs. *fd* is the file descriptor of the connection to the
  * client. This function returns 0 if it succeeds, or returns 0.
  */
-int communicate(int fd)
-{
+int communicate(int fd) {
 	wslay_event_context_ptr ctx;
 	struct wslay_event_callbacks callbacks = {
 		recv_callback,
@@ -157,11 +236,18 @@ int communicate(int fd)
 		NULL,
 		on_msg_recv_callback
 	};
-	struct Session session = { fd };
+	struct Session session;
 	int val = 1;
 	struct pollfd event;
 	int res = 0;
-
+	
+	// Session initialization
+	session.fd = fd;
+	session.session_id = 0;
+	session.role = ROLE_UNDEFINED;
+	session.state = STATE_INIT;
+	session.upload_info = NULL;
+	
 	if(http_handshake(fd) == -1) {
 		return -1;
 	}
@@ -173,6 +259,10 @@ int communicate(int fd)
 		perror("setsockopt: TCP_NODELAY");
 		return -1;
 	}
+	
+	// Connect to database
+	dbserver_socket = connect_to_dbserver();
+	
 	memset(&event, 0, sizeof(struct pollfd));
 	event.fd = fd;
 	event.events = POLLIN;
@@ -219,8 +309,7 @@ int communicate(int fd)
  * process communicates with client. The parent process goes back to
  * the loop and can accept another client.
  */
-void serve(int sfd)
-{
+void serve(int sfd) {
 	while(1) {
 		int fd;
 		while((fd = accept(sfd, NULL, NULL)) == -1 && errno == EINTR);

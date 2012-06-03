@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-c -Wall -I../../contrib/wslay/lib/includes
 LDFLAGS=-L../../contrib/wslay/lib/.libs -I../../contrib/wslay/lib/includes ../../contrib/wslay/lib/.libs/libwslay.a -lssl
-SOURCES=main.c http_handshake.c
+SOURCES=main.c http_handshake.c utils.c dbserver.c upload_info.c
 OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=server.exe
 

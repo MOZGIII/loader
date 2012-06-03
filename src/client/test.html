@@ -4,39 +4,64 @@
       function TestSupport() {
         var result = "Browser capabilities: \n";
         result += "WebSocket: " + (("WebSocket" in window) ? "supported" : "unsupported") + "\n";
+        result += "FileAPI File: " + (("File" in window) ? "supported" : "unsupported") + "\n";
+        result += "FileAPI FileReader: " + (("FileReader" in window) ? "supported" : "unsupported") + "\n";
+        result += "FileAPI FileList: " + (("FileList" in window) ? "supported" : "unsupported") + "\n";
+        result += "FileAPI Blob: " + (("Blob" in window) ? "supported" : "unsupported") + "\n";
         return result;
       }
       
       document.write(TestSupport().replace(/([^>])\n/g, '$1<br/>'));
     </script>
     
+    <script type="text/javascript" src="web-socket-js/swfobject.js"></script>
+    <script type="text/javascript" src="web-socket-js/web_socket.js"></script>
     
-    <script>
-      function log_write(text) {
-        text = text.replace(/([^>])\n/g, '$1<br/>');
-        console.log(text);
-        document.getElementById("log").innerHtml += text + '<br>';        
+    <script type="text/javascript" src="sendfile.js"></script>    
+    
+    <script>      
+      function manageFile(file) {
+        console.log("Start messing with: " + file.name);
+        //console.log(file);
+        var uploader = new Uploader(file);
+        uploader.upload();
       }
-    
-    /*
-      var webSocket = new WebSocket('ws://localhost:8080/upload/1');
+      
+      window.onload = function() {
+        /* We use WebSocket, not XMLHttpRequest!
+        // Chrome compatibility (http://royaltutorials.com/object-has-no-method-sendasbinary/).
+        if(!XMLHttpRequest.prototype.sendAsBinary){
+          XMLHttpRequest.prototype.sendAsBinary = function(datastr) {
+            function byteValue(x) { return x.charCodeAt(0) & 0xff; }
+            var ords = Array.prototype.map.call(datastr, byteValue);
+            var ui8a = new Uint8Array(ords);
+            this.send(ui8a.buffer);
+          }
+        }
+        */
 
-      webSocket.onopen = function(event) {
-        log_write('on_open');
-        webSocket.send("Hello Web Socket!");
-      };
+        document.getElementById("dropzone").ondragenter = function(event) {
+          event.stopPropagation();
+          event.preventDefault();
+        }
 
-      webSocket.onmessage = function(event) {
-        log_write('onmessage, ' + event.data);
-        webSocket.close();
-      };
+        document.getElementById("dropzone").ondragover = function(event) {
+          event.stopPropagation();
+          event.preventDefault();
+        }
 
-      webSocket.onclose = function(event) {
-        log_write('onclose');
-      };*/
+        document.getElementById("dropzone").ondrop = function(event) {
+          event.stopPropagation();
+          event.preventDefault();
+
+          var files = event.dataTransfer.files;
+          for (var i = 0; i < files.length; i++) {
+            // console.log(i);
+            manageFile(files.item(i));
+          }
+        }
+      }
     </script>
-    
-    <script src="sendfile.js"></script>
   </head>
   <body>
     <div style="margin: 20px;">
