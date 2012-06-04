@@ -66,6 +66,8 @@ transfer_info_rec * db_get_transfer_info(int fd, uint32_t session_id) {
 	strcpy(val->real_file_name, tmp);
 	val->real_file_name[val->real_file_name_length] = '\0';
 	
+	val->chunk_size = 1024*1024*5; // chunk size for testing
+	
 	return val;
 }
 

@@ -1,3 +1,7 @@
+#define _LARGEFILE_SOURCE
+#define _LARGEFILE64_SOURCE
+#define _FILE_OFFSET_BITS 64
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -14,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+
+#include <sys/stat.h> // for file operations
 
 #include <wslay/wslay.h>
 
@@ -55,7 +61,8 @@ struct Session {
 	int accepting_payload; // non-zero if we are ready to accept file data chunk
 	
 	upload_info_rec * upload_info; // initialized when session is opened in controller
-	transfer_info_rec * transfer_info; // initialized when session is opened in transmitter
+	transfer_info_rec * transfer_info; // initialized when session is opened in controller and  transmitter
+	
 	int chunk_number; // used for tracking the number of currently uploading chunk in transmitter
 };
 
@@ -124,11 +131,11 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 	
 	/* Operate with non-control messages */
 	if(!wslay_is_ctrl_frame(arg->opcode)) {
-		printf("%02X %d\n", arg->opcode, arg->msg_length);
+		// printf("%02X %d\n", arg->opcode, arg->msg_length);
 		
 		if(session->role == ROLE_UNDEFINED) {
 			// Accept only text messages
-			if(arg->opcode == 0x01) {
+			if(arg->opcode == WSLAY_TEXT_FRAME) {
 				if(strncmp("CONTROLLER", (char *) arg->msg, arg->msg_length) == 0) {
 					session->role = ROLE_CONTROLLER;
 					session->state = STATE_INIT; // force init state
@@ -157,15 +164,23 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 					// If ok
 					if(session->session_id > 0) {
 					
-						char session_id[32];
-						snprintf(session_id, sizeof session_id, "%d", session->session_id);
-						struct wslay_event_msg msgarg = {
-							WSLAY_TEXT_FRAME, (unsigned char *) session_id, strlen(session_id)
-						};
-						wslay_event_queue_msg(ctx, &msgarg);
+						session->transfer_info = db_get_transfer_info(dbserver_socket, session->session_id);
+						if(session->transfer_info) {
 						
-						session->state = STATE_SESSION_OPENED;
-					
+							FILE * cleanup;
+							if((cleanup = fopen(session->transfer_info->real_file_name, "wb")) != NULL) {
+								fclose(cleanup);
+							
+								char session_id[32];
+								snprintf(session_id, sizeof session_id, "%d", session->session_id);
+								struct wslay_event_msg msgarg = {
+									WSLAY_TEXT_FRAME, (unsigned char *) session_id, strlen(session_id)
+								};
+								wslay_event_queue_msg(ctx, &msgarg);
+								
+								session->state = STATE_SESSION_OPENED;
+							}
+						}
 					}
 				}
 				
@@ -176,42 +191,58 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 			}
 		} else if(session->role == ROLE_TRANSMITTER) {
 			if(session->state == STATE_INIT) {
-				session->session_id = atoi((char *) arg->msg);
-				if(session->session_id > 0) {
+				if(arg->msg_length <= 5*1024) { // block overload
+					char tmp[arg->msg_length + 1];
+					memcpy(tmp, arg->msg, arg->msg_length);
+					tmp[arg->msg_length] = '\0';
 					
-					session->transfer_info = db_get_transfer_info(dbserver_socket, session->session_id);
-					if(session->transfer_info) {
-						send_ok(ctx);
-						session->state = STATE_SESSION_OPENED;
+					session->session_id = atoi(tmp);
+					if(session->session_id > 0) {
+						
+						session->transfer_info = db_get_transfer_info(dbserver_socket, session->session_id);
+						if(session->transfer_info) {					
+							send_ok(ctx);
+							session->state = STATE_SESSION_OPENED;						
+						}
 					}
-				}
-				
+				}				
 				
 				if(session->state == STATE_INIT)
 					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
 			} else if(session->state == STATE_SESSION_OPENED) {
-				session->chunk_number = atoi((char *) arg->msg);
-				
-				// ask for acceptence, ill just skip it for now
-				
-				send_ok(ctx);
-				session->state = STATE_ACCEPTING_PAYLOAD;
+			
+				if(arg->msg_length <= 5*1024) { // block overload
+					char tmp[arg->msg_length + 1];
+					memcpy(tmp, arg->msg, arg->msg_length);
+					tmp[arg->msg_length] = '\0';
+					session->chunk_number = atoi(tmp);
+					
+					// ask for acceptence, ill just skip it for now
+					
+					send_ok(ctx);
+					session->state = STATE_ACCEPTING_PAYLOAD;
+				}
 				
 				if(session->state == STATE_SESSION_OPENED)
 					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
 			} else if(session->state == STATE_ACCEPTING_PAYLOAD) {
 				
 				// writing to a file
-				FILE * target;
+				int target;
 				long long offset = session->transfer_info->chunk_size * session->chunk_number;
 
-				if((target = fopen(session->transfer_info->real_file_name, "wb")) != NULL) {
+				if((target = open(session->transfer_info->real_file_name,
+					O_WRONLY | O_APPEND |
+					S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) > 0) {
 					
-					log("Writing chunk #%d to a file %s\n", session->chunk_number, session->transfer_info->real_file_name);
+					log("Writing chunk #%d (offset %lld) to a file %s\n", session->chunk_number, offset, session->transfer_info->real_file_name);
 					
-					fseek(target, offset, SEEK_SET);
-					write(fileno(target), (char *) arg->msg, arg->msg_length);
-					fclose(target);
+					//log("File offset set to %lld...\n", lseek64(target, 0, SEEK_CUR));
+					lseek64(target, offset, SEEK_SET);
+					//log("... after seek %lld...\n", lseek64(target, 0, SEEK_CUR));
+					write(target, arg->msg, arg->msg_length);
+					//log("... and to %lld after write!\n", lseek64(target, 0, SEEK_CUR));
+					close(target);
 					
 					send_ok(ctx);
 					session->state = STATE_SESSION_OPENED;
