@@ -14,9 +14,12 @@
 #include <ctype.h>
 
 #include "upload_info.h"
+#include "transfer_info.h"
 #include "dbserver.h"
+#include "utils.h"
 
 int connect_to_dbserver() {
+	/*
 	struct sockaddr_in address;
 	uint16_t port = DBSERVER_PORT;
 	int sock;
@@ -43,13 +46,26 @@ int connect_to_dbserver() {
 	}
 	
 	return sock;
+	*/
+	return 5; // FTW!
 }
 
 uint32_t db_register_session(int fd, upload_info_rec * upload_info) {
 	return 2;
 }
 
-char * db_get_session_upload_path(int fd, uint32_t session_id) {
-	return "testfile.dat";
+transfer_info_rec * db_get_transfer_info(int fd, uint32_t session_id) {
+	transfer_info_rec * val;	
+	allocate(val, sizeof(transfer_info_rec));
+	
+	char tmp[] = "testfile.dat";
+	
+	val->real_file_name_length = strlen(tmp);
+	allocate(val->real_file_name, val->real_file_name_length + 1);
+	
+	strcpy(val->real_file_name, tmp);
+	val->real_file_name[val->real_file_name_length] = '\0';
+	
+	return val;
 }
 

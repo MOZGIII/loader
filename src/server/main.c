@@ -20,6 +20,7 @@
 #include "http_handshake.h"
 #include "utils.h"
 #include "upload_info.h"
+#include "transfer_info.h"
 #include "dbserver.h"
 
 
@@ -53,11 +54,9 @@ struct Session {
 	
 	int accepting_payload; // non-zero if we are ready to accept file data chunk
 	
-	upload_info_rec * upload_info; // initialized when session is opened
-	
-	
-	char * upload_filename;
-	int chunk_number;
+	upload_info_rec * upload_info; // initialized when session is opened in controller
+	transfer_info_rec * transfer_info; // initialized when session is opened in transmitter
+	int chunk_number; // used for tracking the number of currently uploading chunk in transmitter
 };
 
 int dbserver_socket;
@@ -180,8 +179,8 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 				session->session_id = atoi((char *) arg->msg);
 				if(session->session_id > 0) {
 					
-					session->upload_filename = db_get_session_upload_path(dbserver_socket, session->session_id);
-					if(session->upload_filename) {
+					session->transfer_info = db_get_transfer_info(dbserver_socket, session->session_id);
+					if(session->transfer_info) {
 						send_ok(ctx);
 						session->state = STATE_SESSION_OPENED;
 					}
@@ -203,12 +202,24 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 			} else if(session->state == STATE_ACCEPTING_PAYLOAD) {
 				
 				// writing to a file
-				// here ...
+				FILE * target;
+				long long offset = session->transfer_info->chunk_size * session->chunk_number;
+
+				if((target = fopen(session->transfer_info->real_file_name, "wb")) != NULL) {
+					
+					log("Writing chunk #%d to a file %s\n", session->chunk_number, session->transfer_info->real_file_name);
+					
+					fseek(target, offset, SEEK_SET);
+					write(fileno(target), (char *) arg->msg, arg->msg_length);
+					fclose(target);
+					
+					send_ok(ctx);
+					session->state = STATE_SESSION_OPENED;
 				
-				printf("Writing chunk #%d to a file %s\n", session->chunk_number, session->upload_filename);
-				
-				send_ok(ctx);
-				session->state = STATE_SESSION_OPENED;
+				} else {
+					log("Unable to open the destanation file %s\n", session->transfer_info->real_file_name);
+					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);					
+				}
 				
 				if(session->state == STATE_ACCEPTING_PAYLOAD)
 					close_without_reason(ctx, PROTOCOL_ERROR_INTERNAL);
@@ -247,6 +258,7 @@ int communicate(int fd) {
 	session.role = ROLE_UNDEFINED;
 	session.state = STATE_INIT;
 	session.upload_info = NULL;
+	session.transfer_info = NULL;
 	
 	if(http_handshake(fd) == -1) {
 		return -1;
