@@ -6,8 +6,8 @@
 
 #include "recvline.h"
 
-int recvline(int socket, unsigned char **buffer, size_t *len) {
-	unsigned char c;
+int recvline(int socket, char **buffer, size_t *len) {
+	char c;
 	size_t buffsize = 32;
 	int recvlen;
 	

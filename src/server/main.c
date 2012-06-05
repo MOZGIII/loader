@@ -339,6 +339,9 @@ int communicate(int fd) {
 			event.events |= POLLOUT;
 		}
 	}
+	
+	close(dbserver_socket);
+	
 	return res;
 }
 

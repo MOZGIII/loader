@@ -7,7 +7,7 @@ int create_listen_socket(const char *service);
 
 // Helpers
 
-#define log(text, ...) fprintf(stderr, text, __VA_ARGS__)
+#define log(...) fprintf(stderr, __VA_ARGS__)
 #define min(a, b) (a < b ? a : b)
 #define allocate(dst, bytes) do { if((dst = malloc(bytes)) == NULL){ perror("allocate"); exit(3); } } while(0)
 
