@@ -17,6 +17,11 @@
     <script type="text/javascript" src="web-socket-js/swfobject.js"></script>
     <script type="text/javascript" src="web-socket-js/web_socket.js"></script>
     
+    <script type="text/javascript">
+      // Let the library know where WebSocketMain.swf is:
+      WEB_SOCKET_SWF_LOCATION = "web-socket-js/WebSocketMainInsecure.swf";
+    </script>
+    
     <script type="text/javascript" src="sendfile.js"></script>    
     
     <script>      
@@ -60,12 +65,22 @@
             manageFile(files.item(i));
           }
         }
+        
+        document.getElementById("filefield").onchange = function(event) {          
+          var files = event.currentTarget.files;
+          for (var i = 0; i < files.length; i++) {
+            manageFile(files.item(i));
+          }
+        }
       }
     </script>
   </head>
   <body>
     <div style="margin: 20px;">
       <div id="dropzone" style="border:1px dotted grey; padding: 30px;">Drop files here</div>
+    </div>
+    <div>
+      <input id="filefield" type="file">
     </div>
   <div id="log">
   </div>
