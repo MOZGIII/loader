@@ -167,10 +167,8 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 						session->transfer_info = db_get_transfer_info(dbserver_socket, session->session_id);
 						if(session->transfer_info) {
 						
-							FILE * cleanup;
-							if((cleanup = fopen(session->transfer_info->real_file_name, "wb")) != NULL) {
-								fclose(cleanup);
-							
+							if(unlink(session->transfer_info->real_file_name) == 0 || errno == ENOENT) {
+															
 								char session_id[32];
 								snprintf(session_id, sizeof session_id, "%d", session->session_id);
 								struct wslay_event_msg msgarg = {
@@ -232,8 +230,7 @@ void on_msg_recv_callback(wslay_event_context_ptr ctx,
 				long long offset = session->transfer_info->chunk_size * session->chunk_number;
 
 				if((target = open(session->transfer_info->real_file_name,
-					O_WRONLY | O_APPEND |
-					S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) > 0) {
+					O_WRONLY | O_APPEND | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO)) > 0) {
 					
 					log("Writing chunk #%d (offset %lld) to a file %s\n", session->chunk_number, offset, session->transfer_info->real_file_name);
 					
